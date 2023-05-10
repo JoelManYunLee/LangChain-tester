@@ -2,56 +2,54 @@
 import os 
 from apikey import apikey 
 
-import streamlit as st 
 from langchain.llms import OpenAI
-from langchain.prompts import PromptTemplate
-from langchain.chains import LLMChain, SequentialChain 
-from langchain.memory import ConversationBufferMemory
-from langchain.utilities import WikipediaAPIWrapper 
+from langchain.document_loaders import TextLoader
+from langchain.document_loaders import PyPDFLoader
+from langchain.indexes import VectorstoreIndexCreator
+import streamlit as st
+from streamlit_chat import message
 
 os.environ['OPENAI_API_KEY'] = apikey
+model_id = "gpt-3.5-turbo"
 
-# App framework
-st.title('🦜🔗 YouTube GPT Creator')
-prompt = st.text_input('Plug in your prompt here') 
+# Load PDF document
+# Langchain has many document loaders 
+# We will use their PDF load to load the PDF document below
+loaders = PyPDFLoader('docs/S23_Resume_Joel_Lee.pdf')
 
-# Prompt templates
-title_template = PromptTemplate(
-    input_variables = ['topic'], 
-    template='write me a youtube video title about {topic}'
-)
+# Create a vector representation of this document loaded
+index = VectorstoreIndexCreator().from_loaders([loaders])
 
-script_template = PromptTemplate(
-    input_variables = ['title', 'wikipedia_research'], 
-    template='write me a youtube video script based on this title TITLE: {title} while leveraging this wikipedia reserch:{wikipedia_research} '
-)
+# Setup streamlit app
 
-# Memory 
-title_memory = ConversationBufferMemory(input_key='topic', memory_key='chat_history')
-script_memory = ConversationBufferMemory(input_key='title', memory_key='chat_history')
+# Display the page title and the text box for the user to ask the question
+st.title('🦜 Query your PDF document ')
+prompt = st.text_input("Enter your question to query your PDF documents")
 
+# Save history
 
-# Llms
-llm = OpenAI(temperature=0.9) 
-title_chain = LLMChain(llm=llm, prompt=title_template, verbose=True, output_key='title', memory=title_memory)
-script_chain = LLMChain(llm=llm, prompt=script_template, verbose=True, output_key='script', memory=script_memory)
+# This is used to save chat history and display on the screen
+if 'answer' not in st.session_state:
+    st.session_state['answer'] = []
 
-wiki = WikipediaAPIWrapper()
+if 'question' not in st.session_state:
+    st.session_state['question'] = []   
 
-# Show stuff to the screen if there's a prompt
-if prompt: 
-    title = title_chain.run(prompt)
-    wiki_research = wiki.run(prompt) 
-    script = script_chain.run(title=title, wikipedia_research=wiki_research)
+#------------------------------------------------------------------
+# Display the current response. Chat history is displayed below
 
-    st.write(title) 
-    st.write(script) 
+if prompt:
+    # Get the resonse from LLM
+    # We pass the model name (3.5) and the temperature (Closer to 1 means creative resonse)
+    # stuff chain type sends all the relevant text chunks from the document to LLM
+    response = index.query(llm=OpenAI(model_name = model_id, temperature=0.2), question = prompt, chain_type = 'stuff')
 
-    with st.expander('Title History'): 
-        st.info(title_memory.buffer)
-
-    with st.expander('Script History'): 
-        st.info(script_memory.buffer)
-
-    with st.expander('Wikipedia Research'): 
-        st.info(wiki_research)
+    # Add the question and the answer to display chat history in a list
+    # Latest answer appears at the top
+    st.session_state.question.insert(0,prompt  )
+    st.session_state.answer.insert(0,response  )
+    
+    # Display the chat history
+    for i in range(len( st.session_state.question)) :
+        message(st.session_state['question'][i], is_user=True)
+        message(st.session_state['answer'][i], is_user=False)
